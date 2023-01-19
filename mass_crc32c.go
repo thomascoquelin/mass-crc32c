@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
-	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -18,6 +18,7 @@ import (
 
 var wg sync.WaitGroup
 var pathQueue chan string
+var interrupted bool
 
 var readSize int
 var crc32cTable *crc32.Table
@@ -84,6 +85,9 @@ func pathToCRC(path string) (error, uint64, string) {
 }
 
 func walkHandler(path string, info os.FileInfo, err error) error {
+	if interrupted {
+		return io.EOF
+	}
 	if err != nil {
 		if info.IsDir() {
 			fmt.Fprintf(os.Stderr, "dir error: '%s': %v\n", path, err)
@@ -136,11 +140,24 @@ func main() {
 		wg.Add(1)
 		go fileHandler()
 	}
+
+	// Notify walk to gracefully stop on a CTRL+C via the 'interrupted' flag
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		<-c
+		interrupted = true
+	}()
+
 	startTime := time.Now()
 	for _, arg := range flag.Args() {
 		err := filepath.Walk(arg, walkHandler)
-		if err != nil {
-			log.Fatal(err)
+		if err == io.EOF {
+			fmt.Fprintln(os.Stderr, "walk interrupted")
+			break
+		} else if err != nil {
+			fmt.Fprintf(os.Stderr, "error while walking: %v\n", err)
+			break
 		}
 	}
 	close(pathQueue)
