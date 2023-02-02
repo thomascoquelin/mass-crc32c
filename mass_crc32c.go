@@ -125,7 +125,12 @@ func walkHandler(path string, dir fs.DirEntry, err error) error {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, "Usage of %s: [options] path [path ...]\n\nOptions:\n", os.Args[0])
+	fmt.Fprintf(
+		os.Stderr,
+		"Usage of %s: [options] [path ...]\n%s recurses over paths provided as arguments or gets the file list form stdin otherwize\nOptions:\n",
+		os.Args[0],
+		os.Args[0],
+	)
 	flag.PrintDefaults()
 }
 
@@ -137,11 +142,6 @@ func main() {
 	flag.Usage = printUsage
 
 	flag.Parse()
-	if flag.NArg() == 0 {
-		fmt.Fprintln(os.Stderr, "error: missing paths")
-		printUsage()
-		os.Exit(1)
-	}
 
 	runtime.GOMAXPROCS(*p) // limit number of kernel threads (CPUs used)
 
@@ -158,7 +158,7 @@ func main() {
 		}
 	}()
 
-	if flag.NArg() == 1 && flag.Args()[0] == "-" {
+	if flag.NArg() == 0 {
 		scanLn := fmt.Scanln
 		readFileList(scanLn)
 	} else {
