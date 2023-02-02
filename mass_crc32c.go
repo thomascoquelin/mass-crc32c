@@ -14,7 +14,6 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -150,13 +149,7 @@ func main() {
 	startTime := time.Now()
 
 	// Notify walk to gracefully stop on a CTRL+C via the 'interrupted' flag
-	summaryChan := make(chan os.Signal, 1)
-	signal.Notify(summaryChan, syscall.SIGUSR1)
-	go func() {
-		for _ = range summaryChan {
-			printSummary(startTime)
-		}
-	}()
+	signalToSummary(startTime)
 
 	if flag.NArg() == 0 {
 		scanLn := fmt.Scanln
