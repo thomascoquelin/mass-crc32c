@@ -4,19 +4,8 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
 	"testing"
 )
-
-// This replaces the default test Main
-func TestMain(m *testing.M) {
-	// set global variables
-	setupWorkers(1, 1, 5, testHandler)
-
-	// run tests and report final status
-	code := m.Run()
-	os.Exit(code)
-}
 
 // implements `io.Reader` interface
 type dummyFileReader struct {
@@ -47,6 +36,7 @@ func makeDummyFileReader(payload string) dummyFileReader {
 }
 
 func TestCRCReader(t *testing.T) {
+	mc := initMassCRC32C(1, 1)
 	tests := []struct {
 		name    string
 		crc32c  string
@@ -93,7 +83,7 @@ fringilla diam maximus. Etiam porttitor tortor id ligula feugiat, in sodales sap
 				test.payload,
 			)
 
-			crc, dataLen, err := CRCReader(data)
+			crc, dataLen, err := mc.CRCReader(data)
 			if err != nil {
 				t.Errorf("got unexpected error %v", err)
 			}
@@ -104,18 +94,21 @@ fringilla diam maximus. Etiam porttitor tortor id ligula feugiat, in sodales sap
 			if dataLen != goodLen {
 				t.Errorf("len error, got %d, expected %d", dataLen, goodLen)
 			}
-			goodReadCount := int(math.Ceil(float64(goodLen) / float64(readSizeG*1024)))
+			goodReadCount := int(math.Ceil(float64(goodLen) / float64(mc.readSizeG*1024)))
 			if *data.readCount != goodReadCount {
 				t.Errorf("readCount error, got %d, expected %d\n", *data.readCount, goodReadCount)
 			}
 		},
 		)
 	}
+	mc.tearDown()
 }
 
+// Test reading an actual file
 func TestPathToCRC(t *testing.T) {
+	mc := initMassCRC32C(1, 1)
 	path := "test_data.txt"
-	err, fileSize, crc := pathToCRC(path)
+	err, fileSize, crc := mc.pathToCRC(path)
 	if err != nil {
 		t.Errorf("got unexpected error %v", err)
 	}
@@ -127,76 +120,85 @@ func TestPathToCRC(t *testing.T) {
 	if fileSize != goodLen {
 		t.Errorf("len error, got %d, expected %d", fileSize, goodLen)
 	}
+	mc.tearDown()
 }
 
+// Test stdin line reader
 type scanLnMsg struct {
 	path string
 	err  error
 }
 
-var scanLnChIn chan scanLnMsg
-var scanLnChOut chan scanLnMsg
-var scanLnChErr chan error
+// implements `io.Reader` interface
+type testReader struct {
+	scanLnChIn  chan scanLnMsg
+	scanLnChOut chan scanLnMsg
+	scanLnChErr chan error
+}
 
-func scanLn(a ...any) (n int, err error) {
-	msg := <-scanLnChIn
+func (tb *testReader) Read(p []byte) (n int, err error) {
+	msg := <-tb.scanLnChIn
 	if msg.err != nil {
 		return 0, err
 	}
-	s, ok := a[0].(*string)
-	if !ok {
-		return 0, fmt.Errorf("scanLn: failed to convert %v to (*string)", a[0])
-	}
-	n = len(msg.path)
-	*s = msg.path
+	n = copy(p, msg.path)
 	return
 }
 
-func scanLnSetup(items []scanLnMsg) {
-	scanLnChIn = make(chan scanLnMsg, 5)
-	scanLnChOut = make(chan scanLnMsg, 5)
-	scanLnChErr = make(chan error, 5)
+func testBufferSetup(items []scanLnMsg) *testReader {
+	tb := testReader{
+		scanLnChIn:  make(chan scanLnMsg, 5),
+		scanLnChOut: make(chan scanLnMsg, 5),
+		scanLnChErr: make(chan error, 5),
+	}
 	for _, testItem := range items {
-		scanLnChIn <- scanLnMsg{
-			path: testItem.path,
+		tb.scanLnChIn <- scanLnMsg{
+			path: testItem.path + "\n",
 			err:  nil,
 		}
-		scanLnChOut <- testItem
+		tb.scanLnChOut <- testItem
 	}
-	scanLnChIn <- scanLnMsg{
+	tb.scanLnChIn <- scanLnMsg{
 		path: "",
 		err:  io.EOF,
 	}
+	close(tb.scanLnChIn)
+	return &tb
 }
 
-func testHandler(path string) (err error) {
-	msg := <-scanLnChOut
+func (tb *testReader) testHandler(path string) (err error) {
+	msg := <-tb.scanLnChOut
 	if msg.err != nil {
 		return err
 	}
 	if msg.path != path {
 		err = fmt.Errorf("got %s, expected %s", path, msg.path)
-		scanLnChErr <- err
+		tb.scanLnChErr <- err
 	}
 	return err
 }
 
 func TestReadFileList(t *testing.T) {
-	scanLnSetup([]scanLnMsg{
+
+	tb := testBufferSetup([]scanLnMsg{
 		{"path1", nil},
-		{"path2", nil},
+		{"path 2", nil},
 		{"path3", fmt.Errorf("handled error")}, // should continue despite this error being injected
-		{"path4", nil},
+		{"path/4", nil},
 	})
-	readFileList(scanLn)
-	tearDown()
-	if len(scanLnChIn) > 0 {
-		t.Errorf("input queue isn't empty: %d remaining", len(scanLnChIn))
+	mc := initMassCRC32C(1, 1)
+	mc.HandlerFunc = tb.testHandler
+	mc.stdin = tb
+	mc.startup(1)
+	mc.readFileList()
+	mc.tearDown()
+	if len(tb.scanLnChIn) > 0 {
+		t.Errorf("input queue isn't empty: %d remaining", len(tb.scanLnChIn))
 	}
-	if len(scanLnChOut) > 0 {
-		t.Errorf("out queue isn't empty: %d remaining", len(scanLnChOut))
+	if len(tb.scanLnChOut) > 0 {
+		t.Errorf("out queue isn't empty: %d remaining", len(tb.scanLnChOut))
 	}
-	if len(scanLnChErr) > 0 {
-		t.Errorf("%v\n", <-scanLnChErr)
+	if len(tb.scanLnChErr) > 0 {
+		t.Errorf("%v\n", <-tb.scanLnChErr)
 	}
 }

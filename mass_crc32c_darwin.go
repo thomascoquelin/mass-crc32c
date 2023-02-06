@@ -9,12 +9,12 @@ import (
 	"time"
 )
 
-func signalToSummary(startTime time.Time) {
+func (mc *MassCRC32C) signalToSummary(startTime time.Time) {
 	summaryChan := make(chan os.Signal, 1)
 	signal.Notify(summaryChan, syscall.SIGUSR1)
 	go func() {
 		for _ = range summaryChan {
-			printSummary(startTime)
+			mc.printSummary(startTime)
 		}
 	}()
 }
