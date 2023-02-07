@@ -2,10 +2,6 @@
 
 package main
 
-import (
-	"time"
-)
-
-func (mc *MassCRC32C) signalToSummary(startTime time.Time) {
+func (mc *MassCRC32C) signalToSummary() {
 	//No signal on windows
 }
