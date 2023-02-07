@@ -45,7 +45,7 @@ func (fi *FileInput) WalkDirectories() {
 	for _, arg := range flag.Args() {
 		err := filepath.WalkDir(arg, fi.walkHandler)
 		if err == io.EOF {
-			fmt.Fprintln(fi.mc.ErrOut, "directory walk interrupted")
+			fmt.Fprintln(fi.mc.DebugOut, "directory walk interrupted")
 			break
 		} else if err != nil {
 			fmt.Fprintf(fi.mc.ErrOut, "error while walking: %v\n", err)
@@ -57,6 +57,10 @@ func (fi *FileInput) WalkDirectories() {
 func (fi *FileInput) ReadFileList() {
 	lineScanner := bufio.NewScanner(fi.mc.stdin)
 	for lineScanner.Scan() {
+		if fi.mc.Interrupted {
+			fmt.Fprintln(fi.mc.DebugOut, "directory walk interrupted")
+			break
+		}
 		fi.mc.PathQueueG <- lineScanner.Text()
 		if err := lineScanner.Err(); err != nil {
 			fmt.Fprintf(fi.mc.ErrOut, "error while reading stdin: %v\n", err)

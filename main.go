@@ -61,7 +61,7 @@ func main() {
 		if err != nil {
 			os.Exit(2)
 		}
-
+		defer f.Close()
 		if *compress {
 			gzWriter := gzip.NewWriter(f)
 			defer func(gzWriter *gzip.Writer) {
@@ -78,7 +78,6 @@ func main() {
 		} else {
 			mc.ErrOut = f
 		}
-		defer f.Close()
 	}
 	mc.Startup(*jobCountP)
 	fi := FileInput{mc: mc}
